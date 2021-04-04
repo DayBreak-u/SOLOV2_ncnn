@@ -4,6 +4,11 @@
 
 ## [知乎](https://zhuanlan.zhihu.com/p/361900997?utm_source=qq&utm_medium=social&utm_oi=872955404320141312)
 
+
+## ncnn 模型
+链接: https://pan.baidu.com/s/1W1AiKdI4JJq2LW50uGOVng  密码: phh8
+
+
 ```
 mkdir build
 cd build 
