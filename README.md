@@ -20,7 +20,7 @@ make
 ## 结果展示
 ![avatar](imgs/result.jpg)
 
-## mbv2_slov2 coco val result (short size=448)
+## mbv2_solov2 coco val result (short size=448)
 
 
     Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.254
