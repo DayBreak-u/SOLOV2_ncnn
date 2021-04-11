@@ -22,13 +22,20 @@
 #include <iostream>
 #include <set>
 #include <map>
+#include<sys/time.h>
+//namespace ncnn {
+//
+//// get now timestamp in ms
+//    NCNN_EXPORT double get_current_time();
+//}
 
-namespace ncnn {
+double get_current_time()
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
 
-// get now timestamp in ms
-    NCNN_EXPORT double get_current_time();
+    return tv.tv_sec * 1000.0 + tv.tv_usec / 1000.0;
 }
-
 
 struct Object {
     int cx;
@@ -198,9 +205,8 @@ static inline float sigmoid(float x) {
     return static_cast<float>(1.f / (1.f + exp(-x)));
 }
 
-void
-generate_res(ncnn::Mat &cate_pred, ncnn::Mat &ins_pred, std::map<int, int> &kernel_map,std::vector<std::vector<Object>> &objects, float cate_thresh,
-             float conf_thresh, int img_w, int img_h, int num_class, float stride) {
+void generate_res(ncnn::Mat &cate_pred, ncnn::Mat &ins_pred, std::map<int, int> &kernel_map,std::vector<std::vector<Object> >&objects, float cate_thresh,
+             float conf_thresh, int img_w, int img_h, int num_class, float stride, int wpad, int hpad) {
     int w = cate_pred.w;
     int h = cate_pred.h;
     int w_ins = ins_pred.w;
@@ -242,9 +248,11 @@ generate_res(ncnn::Mat &cate_pred, ncnn::Mat &ins_pred, std::map<int, int> &kern
                 if (socre < conf_thresh) {
                     continue;
                 }
-
+                cv::Mat mask_cut ;
+                cv::Rect rect(wpad/8,hpad/8,w_ins-wpad/4,h_ins-hpad/4);
+                mask_cut = mask(rect);
                 cv::Mat mask2;
-                cv::resize(mask, mask2, cv::Size(img_w, img_h));
+                cv::resize(mask_cut, mask2, cv::Size(img_w, img_h));
                 Object obj;
                 obj.mask = cv::Mat(img_h, img_w, CV_8UC1);
                 float sum_mask_y = 0.f;
@@ -289,44 +297,70 @@ static int detect_solov2(const cv::Mat &bgr, std::vector<Object> &objects) {
 
 
     solov2.opt.num_threads = num_threads;
-    solov2.opt.use_vulkan_compute = false;
+    solov2.opt.use_vulkan_compute = true;
 
 
-    solov2.load_param("../models/solov2_op.param");
-    solov2.load_model("../models/solov2_op.bin");
+//    solov2.load_param("../models/SOLOv2_LIGHT_448_R18_3x.param");
+//    solov2.load_model("../models/SOLOv2_LIGHT_448_R18_3x.bin");
+    solov2.load_param("../models/solov2_mbv2-op.param");
+    solov2.load_model("../models/solov2_mbv2-op.bin");
 
+//    solov2.load_param("../models/solov2_op.param");
+//    solov2.load_model("../models/solov2_op.bin");
 
-
-    const int short_size = 640;
-    const float cate_thresh = 0.1f;
-    const float confidence_thresh = 0.1f;
+    const int target_size = 448;
+    const float cate_thresh = 0.3f;
+    const float confidence_thresh = 0.3f;
     const float nms_threshold = 0.3f;
-    const int keep_top_k = 200;
+       const int keep_top_k = 200;
     int img_w = bgr.cols;
     int img_h = bgr.rows;
     int align_size = 64;
 
-    int target_w = 0;
-    int target_h = 0;
-    std::cout << img_h << "," << img_w << std::endl;
-    if (img_w > img_h) {
-        target_h = short_size;
-        float scale_h =  target_h * 1.0 / img_h;
-        target_w = int((img_w * scale_h) / align_size) * align_size;
-    } else {
-        target_w = short_size;
-        float scale_w = target_w * 1.0 / img_w;
-        target_h = int((img_h * scale_w) / align_size) * align_size;
-    }
-    std::cout << target_h << "," << target_w << std::endl;
-    ncnn::Mat in = ncnn::Mat::from_pixels_resize(bgr.data, ncnn::Mat::PIXEL_BGR2RGB, img_w, img_h, target_w, target_h);
 
+    int w = img_w;
+    int h = img_h;
+    std::cout << img_h << "," << img_w << std::endl;
+//    if (img_w > img_h) {
+//        target_h = short_size;
+//        float scale_h =  target_h * 1.0 / img_h;
+//        target_w = int((img_w * scale_h) / align_size) * align_size;
+//    } else {
+//        target_w = short_size;
+//        float scale_w = target_w * 1.0 / img_w;
+//        target_h = int((img_h * scale_w) / align_size) * align_size;
+//    }
+
+    float scale = 1.f;
+    if (w < h)
+    {
+        scale = (float)target_size / w;
+        w = target_size;
+        h = h * scale;
+    }
+    else
+    {
+        scale = (float)target_size / h;
+        h = target_size;
+        w = w * scale;
+    }
+
+
+    ncnn::Mat in = ncnn::Mat::from_pixels_resize(bgr.data, ncnn::Mat::PIXEL_BGR2RGB, img_w, img_h, w, h);
+   int wpad = (w + align_size - 1) / align_size * align_size - w;
+    int hpad = (h + align_size -1) / align_size * align_size - h;
+    ncnn::Mat in_pad;
+    ncnn::copy_make_border(in, in_pad, hpad / 2, hpad - hpad / 2, wpad / 2, wpad - wpad / 2, ncnn::BORDER_CONSTANT, 114.f);
+    int target_w = in_pad.w;
+    int target_h = in_pad.h;
+
+     std::cout << target_h << "," << target_w << std::endl;
 
     const float mean_vals[3] = {123.68f, 116.78f, 103.94f};
     const float norm_vals[3] = {1.0 / 58.40f, 1.0 / 57.12f, 1.0 / 57.38f};
-    in.substract_mean_normalize(mean_vals, norm_vals);
+    in_pad.substract_mean_normalize(mean_vals, norm_vals);
 
-    double t1 = ncnn::get_current_time();
+    double t1 = get_current_time();
 
     size_t elemsize = sizeof(float);
 
@@ -372,7 +406,7 @@ static int detect_solov2(const cv::Mat &bgr, std::vector<Object> &objects) {
 
 //    ex = solov2.create_extractor();
     ncnn::Extractor ex = solov2.create_extractor();
-    ex.input("input", in);
+    ex.input("input", in_pad);
     ex.input("p3_input", x_p3);
     ex.input("p4_input", x_p4);
     ex.input("p5_input", x_p5);
@@ -380,6 +414,17 @@ static int detect_solov2(const cv::Mat &bgr, std::vector<Object> &objects) {
     ncnn::Mat feature_pred, cate_pred1, cate_pred2, cate_pred3, cate_pred4, cate_pred5, kernel_pred1, kernel_pred2, kernel_pred3, kernel_pred4, kernel_pred5;
 
 
+//    ex.extract("588", cate_pred1);
+//       double t111 = get_current_time();
+//    ex.extract("614", cate_pred1);
+//    double t112 = get_current_time();
+        ex.extract("feature_pred", feature_pred);
+//          double t22 = get_current_time();
+
+
+//    std::cout << "cate ke cost:" << t111 - t1 << "ms" << std::endl;
+//    std::cout << "cate ke cost:" << t112 - t111 << "ms" << std::endl;
+//    std::cout << "ins cost:" << t22 - t112 << "ms" << std::endl;
     ex.extract("cate_pred1", cate_pred1);
     ex.extract("cate_pred2", cate_pred2);
     ex.extract("cate_pred3", cate_pred3);
@@ -390,7 +435,7 @@ static int detect_solov2(const cv::Mat &bgr, std::vector<Object> &objects) {
     ex.extract("kernel_pred3", kernel_pred3);
     ex.extract("kernel_pred4", kernel_pred4);
     ex.extract("kernel_pred5", kernel_pred5);
-    ex.extract("feature_pred", feature_pred);
+
 
 
     int num_class = cate_pred1.c;
@@ -428,20 +473,23 @@ static int detect_solov2(const cv::Mat &bgr, std::vector<Object> &objects) {
 //    std::cout << ins_pred4.h << "," << ins_pred4.w << "," << ins_pred4.c << std::endl;
 //    std::cout << ins_pred5.h << "," << ins_pred5.w << "," << ins_pred5.c << std::endl;
 
-    std::vector<std::vector<Object>> class_candidates;
+    std::vector<std::vector<Object> > class_candidates;
     class_candidates.resize(num_class);
     generate_res(cate_pred1, ins_pred1, kernel_map1, class_candidates, cate_thresh, confidence_thresh, img_w, img_h,
-                 num_class, 8.f);
+                 num_class, 8.f,wpad,hpad);
     generate_res(cate_pred2, ins_pred2, kernel_map2, class_candidates, cate_thresh, confidence_thresh, img_w, img_h,
-                 num_class, 8.f);
+                 num_class, 8.f,wpad,hpad);
     generate_res(cate_pred3, ins_pred3, kernel_map3, class_candidates, cate_thresh, confidence_thresh, img_w, img_h,
-                 num_class,16.f);
+                 num_class,16.f,wpad,hpad);
     generate_res(cate_pred4, ins_pred4, kernel_map4, class_candidates, cate_thresh, confidence_thresh, img_w, img_h,
-                 num_class,32.f);
+                 num_class,32.f,wpad,hpad);
     generate_res(cate_pred5, ins_pred5, kernel_map5, class_candidates, cate_thresh, confidence_thresh, img_w, img_h,
-                 num_class,32.f);
+                 num_class,32.f,wpad,hpad);
+
+  double t11 = get_current_time();
 
 
+    std::cout << "forward cost:" << t11 - t1 << "ms" << std::endl;
 
     objects.clear();
     for (int i = 0; i < (int) class_candidates.size(); i++) {
@@ -465,14 +513,14 @@ static int detect_solov2(const cv::Mat &bgr, std::vector<Object> &objects) {
         objects.resize(keep_top_k);
     }
 
-    double t2 = ncnn::get_current_time();
+    double t2 = get_current_time();
 
 
     std::cout << "all cost:" << t2 - t1 << "ms" << std::endl;
     return 0;
 }
 
-static void draw_objects(const cv::Mat &bgr, const std::vector<Object> &objects) {
+static void draw_objects(const cv::Mat &bgr, const std::vector<Object> &objects, const char* save_path) {
     static const char *class_names[] = {"background",
                                         "person", "bicycle", "car", "motorcycle", "airplane", "bus",
                                         "train", "truck", "boat", "traffic light", "fire hydrant",
@@ -591,7 +639,8 @@ static void draw_objects(const cv::Mat &bgr, const std::vector<Object> &objects)
         color_index++;
 
         char text[256];
-        sprintf(text, "%s %.1f%%", class_names[obj.label], obj.prob * 100);
+//        sprintf(text, "%s %.1f%%", class_names[obj.label], obj.prob * 100);
+        sprintf(text, "%s ", class_names[obj.label]);
 
         int baseLine = 0;
         cv::Size label_size = cv::getTextSize(text, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseLine);
@@ -621,18 +670,19 @@ static void draw_objects(const cv::Mat &bgr, const std::vector<Object> &objects)
         }
     }
 
-    cv::imwrite("result.png", image);
+    cv::imwrite(save_path, image);
 //    cv::imshow("image", image);
 //    cv::waitKey(0);
 }
 
 int main(int argc, char **argv) {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s [imagepath]\n", argv[0]);
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s [imagepath] [savepath]\n", argv[0]);
         return -1;
     }
 
     const char *imagepath = argv[1];
+    const char *save_path = argv[2];
 
     cv::Mat m = cv::imread(imagepath, 1);
     if (m.empty()) {
@@ -643,7 +693,7 @@ int main(int argc, char **argv) {
     std::vector<Object> objects;
     detect_solov2(m, objects);
 
-    draw_objects(m, objects);
+    draw_objects(m, objects,save_path);
 
     return 0;
 }
