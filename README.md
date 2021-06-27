@@ -18,7 +18,7 @@ make
 ```
 
 ## 结果展示
-![avatar](imgs/result.jpg)
+![avatar](imgs/result.png)
 
 ## mbv2_solov2 coco val result (short size=448)
 
